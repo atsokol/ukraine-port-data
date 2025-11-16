@@ -1,0 +1,47 @@
+name: Monthly Data Update
+
+on:
+  schedule:
+    - cron: '0 23 * * 0'
+  workflow_dispatch:
+  
+permissions:
+  contents: write
+
+jobs:
+  import-data:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Set up R
+        uses: r-lib/actions/setup-r@v2
+        with:
+          use-public-rspm: true  # faster installs
+
+      - name: Install packages
+        uses: r-lib/actions/setup-r-dependencies@v2
+        with:
+          cache: true
+          packages: |
+            any::readr
+            any::dplyr
+            any::jsonlite
+            any::httr
+            any::lubridate
+            any::readxl
+            any::purrr
+
+      - name: Check out repository
+        uses: actions/checkout@v3
+
+      - name: Import data
+        run: |
+          Rscript -e 'source("R code/data_download.R")'
+        
+      - name: Commit results
+        run: |
+          git config --local user.email "actions@github.com"
+          git config --local user.name "GitHub Actions"
+          git add data/*
+          git commit -m 'Data updated' || echo "No changes to commit"
+          git push origin || echo "No changes to commit"
