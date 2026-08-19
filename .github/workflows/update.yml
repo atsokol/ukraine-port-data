@@ -23,6 +23,8 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # full history, so the rebase before pushing can resolve
 
       - name: Set up R
         uses: r-lib/actions/setup-r@v2
@@ -50,5 +52,13 @@ jobs:
           git config --local user.email "actions@github.com"
           git config --local user.name "GitHub Actions"
           git add data inputs
-          git commit -m 'Data updated' || echo "No changes to commit"
-          git push origin || echo "Nothing to push"
+          if git diff --cached --quiet; then
+            echo "No changes to commit"
+            exit 0
+          fi
+          git commit -m 'Data updated'
+          # Rebase onto whatever landed while the job was running, then let a
+          # failed push fail the job: swallowing the error reported success
+          # while silently discarding the data we had just downloaded.
+          git pull --rebase origin "$GITHUB_REF_NAME"
+          git push origin "HEAD:$GITHUB_REF_NAME"

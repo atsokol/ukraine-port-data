@@ -43,6 +43,19 @@ ukr_months <- c(
   "Грудень"  = 12
 )
 
+# Map a Ukrainian month name from the source sheets to its number, tolerating
+# case and surrounding whitespace (parse_period does the same for resource
+# titles). An unmatched name would otherwise become an NA date with nothing to
+# say why, so it is reported.
+month_number <- function(x) {
+  out <- unname(ukr_months[match(tolower(trimws(x)), tolower(names(ukr_months)))])
+  bad <- unique(x[is.na(out) & !is.na(x)])
+  if (length(bad) > 0) {
+    warning("Unrecognised month name(s): ", paste(bad, collapse = "; "), call. = FALSE)
+  }
+  out
+}
+
 # Sheet layouts of the source workbooks (sheet 1 = Ф-12, sheet 2 = Ф-13).
 COLS_CALL <- list(
   names = c("port_name", "num", "arrival_date", "arrival_time", "departure_date",
@@ -158,7 +171,18 @@ download_file <- function(file_url, name, max_tries = 5) {
 # Render a parsed Date as a zero-padded ISO string. Dates live as character from
 # here on, so that freshly parsed rows and rows read back from the published CSVs
 # are byte-identical (see the note on SPEC_CALLS above).
-as_iso_date <- function(x) format(x, "%Y-%m-%d")
+#
+# Built with sprintf rather than format(x, "%Y-%m-%d") because strftime's padding
+# of %Y below year 1000 is platform-dependent: macOS pads to four digits, glibc
+# (the CI runner) does not. The source contains typo'd three-digit years, so
+# leaving this to strftime makes a local rebuild and an Actions rebuild disagree
+# on ~46 rows.
+as_iso_date <- function(x) {
+  p <- as.POSIXlt(x)
+  out <- sprintf("%04d-%02d-%02d", p$year + 1900L, p$mon + 1L, p$mday)
+  out[is.na(x)] <- NA_character_
+  out
+}
 
 # Read a given sheet from an already-downloaded local file.
 read_sheet <- function(path, name, sheet, col_names, col_types, skip = 4) {
@@ -179,7 +203,7 @@ read_source <- function(url, name, resource_id) {
     mutate(source_id = resource_id)
 
   volumes <- read_sheet(path, name, 2, COLS_VOL$names, COLS_VOL$types) |>
-    mutate(date = as_iso_date(ymd(paste(year, ukr_months[month], 1, sep = "-")))) |>
+    mutate(date = as_iso_date(make_date(year, month_number(month), 1))) |>
     select(-c(year, month)) |>
     relocate("date", .after = "port_name") |>
     mutate(source_id = resource_id)

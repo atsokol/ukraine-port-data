@@ -22,11 +22,16 @@ needs_rebuild <- function() {
   if (is.null(manifest))  return("no manifest at inputs/source_manifest.csv")
   if (is.null(existing))  return("no existing CSVs, or they predate the source_id column")
 
-  known <- sort(manifest$resource_id)
+  # A source can legitimately contribute zero rows to one of the two sheets, so
+  # its id being absent from that CSV is not a disagreement. Only rows pointing
+  # at a source the manifest has never heard of are; everything else (a source
+  # missing entirely, or with the wrong number of rows) is caught by the count
+  # check below, which reads a zero-row source as the zero it should be.
   for (nm in c("calls", "volumes")) {
-    in_csv <- sort(unique(existing[[nm]]$source_id))
-    if (!identical(known, in_csv)) {
-      return(paste0("manifest and ", nm, " CSV disagree on which sources are present"))
+    orphans <- setdiff(unique(existing[[nm]]$source_id), manifest$resource_id)
+    if (length(orphans) > 0) {
+      return(paste0(nm, " CSV holds ", length(orphans),
+                    " source(s) the manifest does not list"))
     }
   }
 
@@ -42,11 +47,21 @@ needs_rebuild <- function() {
   NULL
 }
 
+# A rebuild re-downloads every source (~77 requests against a rate limiter that
+# has failed us before), so it is never done unattended just because a check
+# tripped: the weekly job stops and asks instead. Set ALLOW_REBUILD=true to let
+# this script do it, or run scripts/data_download.R directly.
 reason <- needs_rebuild()
 if (!is.null(reason)) {
-  message("Full rebuild required: ", reason)
-  rebuild_dataset()
-  quit(save = "no", status = 0)
+  if (isTRUE(as.logical(Sys.getenv("ALLOW_REBUILD", "false")))) {
+    message("Full rebuild required: ", reason)
+    rebuild_dataset()
+    quit(save = "no", status = 0)
+  }
+  stop("Full rebuild required (", reason, "), which this script will not do ",
+       "unattended - it re-downloads every source file from a rate-limited API. ",
+       "Run the 'Full Data Rebuild (manual)' workflow, or re-run with ",
+       "ALLOW_REBUILD=true.", call. = FALSE)
 }
 
 # ---- Work out what changed --------------------------------------------------
